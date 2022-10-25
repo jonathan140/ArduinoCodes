@@ -1,0 +1,173 @@
+#include <ESP8266WiFi.h>
+#include "Adafruit_MQTT.h"
+#include "Adafruit_MQTT_Client.h"
+
+/************************* WiFi Access Point *********************************/
+
+#define WLAN_SSID       "ARTEFACTOS"
+#define WLAN_PASS       "ARTEFACTOS"
+
+/************************* Adafruit.io Setup *********************************/
+
+#define AIO_SERVER      "io.adafruit.com"
+#define AIO_SERVERPORT  1883                   // use 8883 for SSL
+#define AIO_USERNAME    "JhonyBlake"
+#define AIO_KEY         "aio_lymB3449bqViGN2oamU2tFIGaS00"
+
+/************ Global State (you don't need to change this!) ******************/
+
+// Create an ESP8266 WiFiClient class to connect to the MQTT server.
+WiFiClient client;
+// or... use WiFiClientSecure for SSL
+//WiFiClientSecure client;
+
+// Setup the MQTT client class by passing in the WiFi client and MQTT server and login details.
+Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_USERNAME, AIO_KEY);
+
+/****************************** Feeds for Publishing***************************************/
+// Setup a feed called 'photocell' for publishing.
+Adafruit_MQTT_Publish indicador = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/labo5");
+Adafruit_MQTT_Publish humedad = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/humedad");
+Adafruit_MQTT_Publish tempc = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/temc");
+Adafruit_MQTT_Publish tempf = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/temf");
+
+/****************************** Feeds for Subscribing***************************************/
+
+
+/*************************** Sketch Code ************************************/
+
+//*********************************************** SetUp *****************************/
+int sensor = D0;
+int valor;
+
+// Example testing sketch for various DHT humidity/temperature sensors
+// Written by ladyada, public domain
+
+// REQUIRES the following Arduino libraries:
+// - DHT Sensor Library: https://github.com/adafruit/DHT-sensor-library
+// - Adafruit Unified Sensor Lib: https://github.com/adafruit/Adafruit_Sensor
+
+#include "DHT.h"
+
+#define DHTPIN D1     // Digital pin connected to the DHT sensor
+// Feather HUZZAH ESP8266 note: use pins 3, 4, 5, 12, 13 or 14 --
+// Pin 15 can work but DHT must be disconnected during program upload.
+
+// Uncomment whatever type you're using!
+//#define DHTTYPE DHT11   // DHT 11
+#define DHTTYPE DHT11   // DHT 22  (AM2302), AM2321
+//#define DHTTYPE DHT21   // DHT 21 (AM2301)
+
+// Connect pin 1 (on the left) of the sensor to +5V
+// NOTE: If using a board with 3.3V logic like an Arduino Due connect pin 1
+// to 3.3V instead of 5V!
+// Connect pin 2 of the sensor to whatever your DHTPIN is
+// Connect pin 3 (on the right) of the sensor to GROUND (if your sensor has 3 pins)
+// Connect pin 4 (on the right) of the sensor to GROUND and leave the pin 3 EMPTY (if your sensor has 4 pins)
+// Connect a 10K resistor from pin 2 (data) to pin 1 (power) of the sensor
+
+// Initialize DHT sensor.
+// Note that older versions of this library took an optional third parameter to
+// tweak the timings for faster processors.  This parameter is no longer needed
+// as the current DHT reading algorithm adjusts itself to work on faster procs.
+DHT dht(DHTPIN, DHTTYPE);
+
+void setup() {
+  pinMode(sensor, INPUT);
+  Serial.begin(115200);
+  delay(10);
+
+  dht.begin();
+  //****************************************** Connect to WiFi access point.
+  Serial.println(); Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(WLAN_SSID);
+
+  WiFi.begin(WLAN_SSID, WLAN_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  Serial.println("WiFi connected");
+  Serial.println("IP address: "); Serial.println(WiFi.localIP());
+  //********************************************* Callback Functions
+
+  // Setup MQTT subscription for feed's.
+
+}
+
+//***************************************************** Loop ********************************/
+void loop() {
+  MQTT_connect();
+  mqtt.processPackets(10000);
+  if(! mqtt.ping()) {   // ping the server to keep the mqtt connection alive
+    mqtt.disconnect();}
+
+  valor = digitalRead(sensor);
+  if(valor == 0){
+    Serial.println("objeto detectado");
+  }
+  else{
+    Serial.println("no hay nada");
+  }
+
+  // Wait a few seconds between measurements.
+  delay(2000);
+
+  // Reading temperature or humidity takes about 250 milliseconds!
+  // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
+  float h = dht.readHumidity();
+  // Read temperature as Celsius (the default)
+  float t = dht.readTemperature();
+  // Read temperature as Fahrenheit (isFahrenheit = true)
+  float f = dht.readTemperature(true);
+
+  // Check if any reads failed and exit early (to try again).
+  if (isnan(h) || isnan(t) || isnan(f)) {
+    Serial.println(F("Failed to read from DHT sensor!"));
+    return;
+  }
+
+  // Compute heat index in Fahrenheit (the default)
+  float hif = dht.computeHeatIndex(f, h);
+  // Compute heat index in Celsius (isFahreheit = false)
+  float hic = dht.computeHeatIndex(t, h, false);
+
+  Serial.print(F("Humidity: "));
+  Serial.print(h);
+  Serial.print(F("%  Temperature: "));
+  Serial.print(t);
+  Serial.print(F("°C "));
+  Serial.print(f);
+  Serial.print(F("°F  Heat index: "));
+  Serial.print(hic);
+  Serial.print(F("°C "));
+  Serial.print(hif);
+  Serial.println(F("°F"));
+  
+  indicador.publish(valor);
+  humedad.publish(h);
+  tempc.publish(t);
+  tempf.publish(f);
+// Now we can publish stuff!
+  }
+
+// Function to connect and reconnect as necessary to the MQTT server.
+void MQTT_connect() {
+  int8_t ret;
+  // Stop if already connected.
+  if (mqtt.connected()) {
+    return;}
+  Serial.print("Connecting to MQTT... ");
+  uint8_t retries = 3;
+  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
+       Serial.println(mqtt.connectErrorString(ret));
+       Serial.println("Retrying MQTT connection in 10 seconds...");
+       mqtt.disconnect();
+       delay(10000);  // wait 10 seconds
+       retries--;
+       if (retries == 0) {       // basically die and wait for WDT to reset me
+         while (1);}}
+  Serial.println("MQTT Connected!");
+}
